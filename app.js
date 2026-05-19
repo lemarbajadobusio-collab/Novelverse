@@ -6,13 +6,41 @@ let currentNovelId = null;
 let currentChapter = 1;
 let currentGenre = '';
 let searchTimer = null;
+let currentTheme = 'dark';
 
 // ── INIT ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  initTheme();
   await initSupabase();
   await checkAuth();
   loadNovels();
 });
+
+function initTheme() {
+  const savedTheme = localStorage.getItem('novelverse-theme');
+  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  currentTheme = savedTheme || (prefersLight ? 'light' : 'dark');
+  applyTheme(currentTheme);
+}
+
+function applyTheme(theme) {
+  currentTheme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = currentTheme;
+
+  const btn = document.getElementById('themeToggle');
+  if (btn) {
+    const isLight = currentTheme === 'light';
+    btn.textContent = isLight ? '☀' : '☾';
+    btn.setAttribute('aria-label', `Switch to ${isLight ? 'dark' : 'light'} mode`);
+    btn.title = `Switch to ${isLight ? 'dark' : 'light'} mode`;
+  }
+}
+
+function toggleTheme() {
+  const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
+  localStorage.setItem('novelverse-theme', nextTheme);
+  applyTheme(nextTheme);
+}
 
 async function initSupabase() {
   try {
