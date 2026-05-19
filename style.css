@@ -11,6 +11,10 @@
   --text: #e8e2d4;
   --text2: #a89e88;
   --text3: #6b6254;
+  --nav-bg: rgba(13,12,10,0.9);
+  --reader-bg: rgba(13,12,10,0.95);
+  --badge-bg: rgba(13,12,10,0.85);
+  --modal-overlay: rgba(0,0,0,0.75);
   --red: #c0392b;
   --green: #27ae60;
   --radius: 6px;
@@ -18,6 +22,27 @@
   --ff-head: 'Playfair Display', serif;
   --ff-body: 'Crimson Pro', serif;
   --ff-mono: 'JetBrains Mono', monospace;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f7f3eb;
+  --bg2: #fffaf2;
+  --bg3: #efe6d7;
+  --bg4: #e2d2ba;
+  --border: rgba(122,88,31,0.2);
+  --gold: #9d6a1f;
+  --gold2: #7f5012;
+  --gold-dim: rgba(157,106,31,0.16);
+  --text: #231d16;
+  --text2: #625342;
+  --text3: #8b7d6d;
+  --nav-bg: rgba(247,243,235,0.92);
+  --reader-bg: rgba(247,243,235,0.96);
+  --badge-bg: rgba(255,250,242,0.9);
+  --modal-overlay: rgba(35,29,22,0.45);
+  --shadow: 0 10px 34px rgba(84,62,35,0.18);
+  color-scheme: light;
 }
 
 /* ── RESET ──────────────────────────────────────────────────────── */
@@ -60,7 +85,7 @@ select option { background: var(--bg3); }
 /* ── NAVBAR ─────────────────────────────────────────────────────── */
 .navbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  background: rgba(13,12,10,0.9);
+  background: var(--nav-bg);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
@@ -95,6 +120,15 @@ select option { background: var(--bg3); }
   position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
   color: var(--text3); font-size: 16px; pointer-events: none;
 }
+
+.theme-toggle {
+  width: 36px; height: 36px; flex: 0 0 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--gold); border-radius: var(--radius);
+  font-size: 16px; line-height: 1; transition: all .2s;
+}
+.theme-toggle:hover { border-color: var(--gold); background: var(--gold-dim); }
 
 .btn-login {
   background: none; border: 1px solid var(--border);
@@ -306,7 +340,7 @@ select option { background: var(--bg3); }
 }
 .card-genre-badge {
   position: absolute; top: 12px; right: 12px;
-  background: rgba(13,12,10,0.85); border: 1px solid var(--border);
+  background: var(--badge-bg); border: 1px solid var(--border);
   color: var(--gold); font-family: var(--ff-mono); font-size: 10px;
   letter-spacing: 1.5px; text-transform: uppercase; padding: 3px 8px; border-radius: 3px;
 }
@@ -371,7 +405,7 @@ select option { background: var(--bg3); }
 .reader-wrap { max-width: 760px; margin: 0 auto; padding: 80px 24px 80px; }
 .reader-toolbar {
   position: fixed; top: 64px; left: 0; right: 0; z-index: 50;
-  background: rgba(13,12,10,0.95); backdrop-filter: blur(8px);
+  background: var(--reader-bg); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 16px; padding: 10px 24px;
 }
@@ -458,7 +492,7 @@ tr:hover td { background: var(--bg2); }
 /* ── MODALS ──────────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 200;
-  background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);
+  background: var(--modal-overlay); backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center; padding: 20px;
   animation: fadeIn .15s ease;
 }
