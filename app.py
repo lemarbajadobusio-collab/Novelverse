@@ -62,6 +62,10 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
+
+    novel_columns = {row[1] for row in c.execute("PRAGMA table_info(novels)").fetchall()}
+    if 'cover' not in novel_columns:
+        c.execute("ALTER TABLE novels ADD COLUMN cover TEXT DEFAULT ''")
     
     c.execute('''CREATE TABLE IF NOT EXISTS chapters (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -267,9 +271,9 @@ def get_novel(novel_id):
 def create_novel():
     data = request.json
     conn = get_db()
-    conn.execute("INSERT INTO novels (title, author, description, genre, status) VALUES (?, ?, ?, ?, ?)",
+    conn.execute("INSERT INTO novels (title, author, description, cover, genre, status) VALUES (?, ?, ?, ?, ?, ?)",
                  (data['title'], data['author'], data.get('description', ''),
-                  data.get('genre', ''), data.get('status', 'ongoing')))
+                  data.get('cover', ''), data.get('genre', ''), data.get('status', 'ongoing')))
     conn.commit()
     novel_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.close()
@@ -280,9 +284,9 @@ def create_novel():
 def update_novel(novel_id):
     data = request.json
     conn = get_db()
-    conn.execute("UPDATE novels SET title=?, author=?, description=?, genre=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+    conn.execute("UPDATE novels SET title=?, author=?, description=?, cover=?, genre=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                  (data['title'], data['author'], data.get('description', ''),
-                  data.get('genre', ''), data.get('status', 'ongoing'), novel_id))
+                  data.get('cover', ''), data.get('genre', ''), data.get('status', 'ongoing'), novel_id))
     conn.commit()
     conn.close()
     return jsonify({'message': 'Novel updated'})
