@@ -193,13 +193,19 @@ function genreEmoji(genre) {
   return map[genre] || '📖';
 }
 
+function coverImage(url, alt, className) {
+  if (!url) return '';
+  return `<img class="${className}" src="${esc(url)}" alt="${esc(alt)} cover" loading="lazy">`;
+}
+
 function createNovelCard(n) {
   const card = document.createElement('div');
   card.className = 'novel-card';
   card.onclick = () => openNovel(n.id);
   card.innerHTML = `
     <div class="card-cover cover-${n.genre || 'fantasy'}">
-      <div class="card-cover-inner">${genreEmoji(n.genre)}</div>
+      ${coverImage(n.cover, n.title, 'cover-img')}
+      <div class="card-cover-inner ${n.cover ? 'has-cover' : ''}">${genreEmoji(n.genre)}</div>
       <span class="card-genre-badge">${n.genre || 'fiction'}</span>
       <span class="card-status status-${n.status}">${n.status}</span>
     </div>
@@ -241,7 +247,10 @@ function renderNovelDetail(n) {
 
   detail.innerHTML = `
     <div class="novel-detail-header">
-      <div class="novel-cover-lg cover-${n.genre || 'fantasy'}">${genreEmoji(n.genre)}</div>
+      <div class="novel-cover-lg cover-${n.genre || 'fantasy'} ${n.cover ? 'has-cover-image' : ''}">
+        ${coverImage(n.cover, n.title, 'cover-img')}
+        <span class="${n.cover ? 'has-cover' : ''}">${genreEmoji(n.genre)}</span>
+      </div>
       <div class="novel-meta">
         <h1>${esc(n.title)}</h1>
         <div class="author">${esc(n.author)}</div>
@@ -443,6 +452,7 @@ function openNovelForm() {
   document.getElementById('nfTitle').value = '';
   document.getElementById('nfAuthor').value = '';
   document.getElementById('nfDescription').value = '';
+  document.getElementById('nfCover').value = '';
   document.getElementById('nfGenre').value = 'fantasy';
   document.getElementById('nfStatus').value = 'ongoing';
   openModal('novelFormModal');
@@ -454,6 +464,7 @@ function openEditNovel(id, novel) {
   document.getElementById('nfTitle').value = novel.title;
   document.getElementById('nfAuthor').value = novel.author;
   document.getElementById('nfDescription').value = novel.description || '';
+  document.getElementById('nfCover').value = novel.cover || '';
   document.getElementById('nfGenre').value = novel.genre || 'fantasy';
   document.getElementById('nfStatus').value = novel.status || 'ongoing';
   openModal('novelFormModal');
@@ -466,6 +477,7 @@ async function handleNovelForm(e) {
     title: document.getElementById('nfTitle').value,
     author: document.getElementById('nfAuthor').value,
     description: document.getElementById('nfDescription').value,
+    cover: document.getElementById('nfCover').value,
     genre: document.getElementById('nfGenre').value,
     status: document.getElementById('nfStatus').value,
   };
