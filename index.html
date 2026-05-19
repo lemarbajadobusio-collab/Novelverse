@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NovelVerse — Read Stories, Live Worlds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── NAVBAR ─────────────────────────────────────────────────────── -->
+<nav class="navbar" id="navbar">
+  <div class="nav-inner">
+    <a class="logo" href="#" onclick="showPage('home')">
+      <span class="logo-icon">⬡</span>
+      <span class="logo-text">NovelVerse</span>
+    </a>
+    <div class="nav-links">
+      <a href="#" onclick="showPage('home')" class="nav-link active" data-page="home">Discover</a>
+      <a href="#" onclick="requireLogin('library')" class="nav-link" data-page="library">Library</a>
+      <a href="#" onclick="requireLogin('favorites')" class="nav-link" data-page="favorites">Favorites</a>
+      <a href="#" onclick="showAdminIfAllowed()" class="nav-link admin-only hidden" data-page="admin">Admin</a>
+    </div>
+    <div class="nav-actions">
+      <div class="search-bar">
+        <input type="text" id="searchInput" placeholder="Search novels…" oninput="debounceSearch()">
+        <span class="search-icon">⌕</span>
+      </div>
+      <!-- Profile area -->
+      <div class="profile-area" id="profileArea">
+        <button class="btn-login" onclick="openModal('loginModal')">Sign In</button>
+        <button class="btn-register" onclick="openModal('registerModal')">Join Free</button>
+      </div>
+      <div class="profile-dropdown-wrapper hidden" id="profileDropdownWrapper">
+        <button class="profile-btn" id="profileBtn" onclick="toggleProfileDropdown()">
+          <div class="avatar-circle" id="avatarCircle">U</div>
+          <span class="profile-name" id="profileName">User</span>
+          <span class="chevron">▾</span>
+        </button>
+        <div class="profile-dropdown hidden" id="profileDropdown">
+          <div class="dropdown-header">
+            <div class="avatar-large" id="avatarLarge">U</div>
+            <div>
+              <div class="dropdown-username" id="dropdownUsername">Username</div>
+              <div class="dropdown-email" id="dropdownEmail">email@example.com</div>
+              <div class="dropdown-role" id="dropdownRole">Member</div>
+            </div>
+          </div>
+          <div class="dropdown-stats" id="dropdownStats">
+            <div class="d-stat"><span id="statFavs">0</span><small>Favorites</small></div>
+            <div class="d-stat"><span id="statLib">0</span><small>Library</small></div>
+          </div>
+          <div class="dropdown-menu-items">
+            <a href="#" onclick="requireLogin('library'); closeDropdown()">📚 My Library</a>
+            <a href="#" onclick="requireLogin('favorites'); closeDropdown()">❤️ Favorites</a>
+            <a href="#" class="admin-only hidden" onclick="showAdminIfAllowed(); closeDropdown()">⚙️ Admin Panel</a>
+            <hr>
+            <a href="#" onclick="logout()" class="logout-link">↩ Sign Out</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ── PAGES ──────────────────────────────────────────────────────── -->
+
+<!-- HOME PAGE -->
+<div id="page-home" class="page active">
+  <section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-content">
+      <p class="hero-eyebrow">Your next great read awaits</p>
+      <h1 class="hero-title">Worlds built<br><em>word by word</em></h1>
+      <p class="hero-sub">Thousands of stories. Endless imagination. One destination.</p>
+      <div class="hero-actions">
+        <button class="btn-primary" onclick="document.querySelector('.novels-section').scrollIntoView({behavior:'smooth'})">Start Reading</button>
+        <button class="btn-ghost" onclick="openModal('registerModal')">Create Account</button>
+      </div>
+    </div>
+    <div class="hero-floating-books">
+      <div class="book-card f1">Fantasy</div>
+      <div class="book-card f2">Romance</div>
+      <div class="book-card f3">Sci-Fi</div>
+    </div>
+  </section>
+
+  <section class="novels-section">
+    <div class="section-header">
+      <h2 class="section-title">Browse Novels</h2>
+      <div class="genre-filters">
+        <button class="genre-btn active" onclick="filterGenre('')">All</button>
+        <button class="genre-btn" onclick="filterGenre('fantasy')">Fantasy</button>
+        <button class="genre-btn" onclick="filterGenre('sci-fi')">Sci-Fi</button>
+        <button class="genre-btn" onclick="filterGenre('mystery')">Mystery</button>
+        <button class="genre-btn" onclick="filterGenre('romance')">Romance</button>
+      </div>
+    </div>
+    <div class="novels-grid" id="novelsGrid">
+      <div class="loading-placeholder">Loading stories…</div>
+    </div>
+  </section>
+</div>
+
+<!-- NOVEL DETAIL PAGE -->
+<div id="page-novel" class="page">
+  <div class="novel-detail-wrap">
+    <button class="back-btn" onclick="showPage('home')">← Back</button>
+    <div class="novel-detail" id="novelDetail"></div>
+  </div>
+</div>
+
+<!-- READER PAGE -->
+<div id="page-reader" class="page">
+  <div class="reader-wrap">
+    <div class="reader-toolbar">
+      <button class="back-btn" id="readerBackBtn" onclick="backFromReader()">← Novel</button>
+      <span class="reader-chapter-label" id="readerChapterLabel"></span>
+      <div class="reader-nav">
+        <button id="prevChBtn" onclick="navigateChapter(-1)">‹ Prev</button>
+        <button id="nextChBtn" onclick="navigateChapter(1)">Next ›</button>
+      </div>
+    </div>
+    <div class="reader-content" id="readerContent"></div>
+  </div>
+</div>
+
+<!-- LIBRARY PAGE -->
+<div id="page-library" class="page">
+  <div class="collection-page">
+    <h2 class="page-heading">My Library</h2>
+    <p class="page-sub">Books you've saved to read</p>
+    <div class="novels-grid" id="libraryGrid"><div class="empty-state">Your library is empty</div></div>
+  </div>
+</div>
+
+<!-- FAVORITES PAGE -->
+<div id="page-favorites" class="page">
+  <div class="collection-page">
+    <h2 class="page-heading">Favorites</h2>
+    <p class="page-sub">Stories close to your heart</p>
+    <div class="novels-grid" id="favoritesGrid"><div class="empty-state">No favorites yet</div></div>
+  </div>
+</div>
+
+<!-- ADMIN PAGE -->
+<div id="page-admin" class="page">
+  <div class="admin-wrap">
+    <div class="admin-sidebar">
+      <div class="admin-logo">⬡ Admin</div>
+      <nav class="admin-nav">
+        <a href="#" class="admin-nav-item active" onclick="adminTab('dashboard')">📊 Dashboard</a>
+        <a href="#" class="admin-nav-item" onclick="adminTab('novels')">📚 Novels</a>
+        <a href="#" class="admin-nav-item" onclick="adminTab('users')">👥 Users</a>
+      </nav>
+    </div>
+    <div class="admin-main">
+      <!-- Dashboard Tab -->
+      <div id="admin-dashboard" class="admin-tab active">
+        <h2>Dashboard</h2>
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="recent-panel" id="recentNovelsPanel"></div>
+      </div>
+      <!-- Novels Tab -->
+      <div id="admin-novels" class="admin-tab">
+        <div class="admin-tab-header">
+          <h2>Manage Novels</h2>
+          <button class="btn-primary" onclick="openNovelForm()">+ Add Novel</button>
+        </div>
+        <div class="admin-table-wrap" id="adminNovelsTable"></div>
+      </div>
+      <!-- Users Tab -->
+      <div id="admin-users" class="admin-tab">
+        <h2>Manage Users</h2>
+        <div class="admin-table-wrap" id="adminUsersTable"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODALS ──────────────────────────────────────────────────────── -->
+
+<!-- Login Modal -->
+<div class="modal-overlay hidden" id="loginModal" onclick="closeModalOnOverlay(event,'loginModal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('loginModal')">×</button>
+    <div class="modal-header">
+      <div class="modal-logo">⬡</div>
+      <h2>Welcome Back</h2>
+      <p>Sign in to continue your journey</p>
+    </div>
+    <form onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="loginEmail" placeholder="your@email.com" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="loginPassword" placeholder="••••••••" required>
+      </div>
+      <div class="form-error hidden" id="loginError"></div>
+      <button type="submit" class="btn-full">Sign In</button>
+    </form>
+    <p class="modal-footer">No account? <a href="#" onclick="switchModal('loginModal','registerModal')">Join free</a></p>
+  </div>
+</div>
+
+<!-- Register Modal -->
+<div class="modal-overlay hidden" id="registerModal" onclick="closeModalOnOverlay(event,'registerModal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('registerModal')">×</button>
+    <div class="modal-header">
+      <div class="modal-logo">⬡</div>
+      <h2>Create Account</h2>
+      <p>Join thousands of readers today</p>
+    </div>
+    <form onsubmit="handleRegister(event)">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="regUsername" placeholder="Choose a username" required>
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="regEmail" placeholder="your@email.com" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="regPassword" placeholder="Min 6 characters" required>
+      </div>
+      <div class="form-error hidden" id="registerError"></div>
+      <button type="submit" class="btn-full">Create Account</button>
+    </form>
+    <p class="modal-footer">Have an account? <a href="#" onclick="switchModal('registerModal','loginModal')">Sign in</a></p>
+  </div>
+</div>
+
+<!-- Novel Form Modal (Admin) -->
+<div class="modal-overlay hidden" id="novelFormModal" onclick="closeModalOnOverlay(event,'novelFormModal')">
+  <div class="modal modal-wide">
+    <button class="modal-close" onclick="closeModal('novelFormModal')">×</button>
+    <div class="modal-header">
+      <h2 id="novelFormTitle">Add Novel</h2>
+    </div>
+    <form onsubmit="handleNovelForm(event)">
+      <input type="hidden" id="novelFormId">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Title</label>
+          <input type="text" id="nfTitle" required>
+        </div>
+        <div class="form-group">
+          <label>Author</label>
+          <input type="text" id="nfAuthor" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="nfDescription" rows="4"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Genre</label>
+          <select id="nfGenre">
+            <option value="fantasy">Fantasy</option>
+            <option value="sci-fi">Sci-Fi</option>
+            <option value="mystery">Mystery</option>
+            <option value="romance">Romance</option>
+            <option value="thriller">Thriller</option>
+            <option value="horror">Horror</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="nfStatus">
+            <option value="ongoing">Ongoing</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-error hidden" id="novelFormError"></div>
+      <button type="submit" class="btn-full" id="novelFormBtn">Save Novel</button>
+    </form>
+  </div>
+</div>
+
+<!-- Chapter Form Modal (Admin) -->
+<div class="modal-overlay hidden" id="chapterFormModal" onclick="closeModalOnOverlay(event,'chapterFormModal')">
+  <div class="modal modal-wide">
+    <button class="modal-close" onclick="closeModal('chapterFormModal')">×</button>
+    <div class="modal-header">
+      <h2>Add Chapter</h2>
+    </div>
+    <form onsubmit="handleChapterForm(event)">
+      <input type="hidden" id="chFormNovelId">
+      <div class="form-group">
+        <label>Chapter Title</label>
+        <input type="text" id="chFormTitle" required>
+      </div>
+      <div class="form-group">
+        <label>Content</label>
+        <textarea id="chFormContent" rows="12" placeholder="Write chapter content…" required></textarea>
+      </div>
+      <div class="form-error hidden" id="chapterFormError"></div>
+      <button type="submit" class="btn-full">Save Chapter</button>
+    </form>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast hidden" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
