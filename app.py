@@ -473,6 +473,30 @@ def toggle_library(novel_id):
         )
         return jsonify({'in_library': True})
 
+# COMMENTS
+
+@app.route('/api/novels/<int:novel_id>/comments', methods=['GET'])
+def get_comments(novel_id):
+    comments = fetch_all('''SELECT c.id, c.content, c.created_at, u.username
+                            FROM comments c JOIN users u ON c.user_id=u.id
+                            WHERE c.novel_id=:novel_id
+                            ORDER BY c.created_at DESC''',
+                         {'novel_id': novel_id})
+    return jsonify(comments)
+
+@app.route('/api/novels/<int:novel_id>/comments', methods=['POST'])
+@login_required
+def add_comment(novel_id):
+    data = request.json or {}
+    content = data.get('content', '').strip()
+    if not content:
+        return jsonify({'error': 'Comment cannot be empty'}), 400
+    execute(
+        "INSERT INTO comments (user_id, novel_id, content) VALUES (:user_id, :novel_id, :content)",
+        {'user_id': session['user_id'], 'novel_id': novel_id, 'content': content}
+    )
+    return jsonify({'message': 'Comment added'})
+
 # â”€â”€â”€ ADMIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/admin/stats', methods=['GET'])
