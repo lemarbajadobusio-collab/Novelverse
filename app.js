@@ -7,10 +7,13 @@ let currentChapter = 1;
 let currentGenre = '';
 let searchTimer = null;
 let currentTheme = 'dark';
+let readerFontSize = 19;
+let pendingDeleteAction = null;
 
 // ── INIT ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
+  initReaderFontSize();
   await initSupabase();
   await checkAuth();
   loadNovels();
@@ -40,6 +43,24 @@ function toggleTheme() {
   const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
   localStorage.setItem('novelverse-theme', nextTheme);
   applyTheme(nextTheme);
+}
+
+function initReaderFontSize() {
+  const saved = Number(localStorage.getItem('novelverse-reader-font-size'));
+  readerFontSize = Number.isFinite(saved) && saved >= 15 && saved <= 28 ? saved : 19;
+  applyReaderFontSize();
+}
+
+function applyReaderFontSize() {
+  document.documentElement.style.setProperty('--reader-font-size', `${readerFontSize}px`);
+  const label = document.getElementById('readerFontSizeLabel');
+  if (label) label.textContent = `${readerFontSize}px`;
+}
+
+function changeReaderFontSize(delta) {
+  readerFontSize = Math.max(15, Math.min(28, readerFontSize + delta));
+  localStorage.setItem('novelverse-reader-font-size', String(readerFontSize));
+  applyReaderFontSize();
 }
 
 async function initSupabase() {
@@ -306,7 +327,69 @@ function renderNovelDetail(n) {
             <span class="ch-date">${formatDate(c.created_at)}</span>
           </div>`).join('') : '<div style="color:var(--text3);padding:20px;text-align:center">No chapters yet</div>'}
       </div>
+    </div>
+    <div class="comments-section">
+      <div class="comments-header">
+        <h3>Comments</h3>
+        <span id="commentCount">0</span>
+      </div>
+      ${currentUser ? `
+        <form class="comment-form" onsubmit="handleCommentSubmit(event, ${n.id})">
+          <textarea id="commentInput" rows="3" placeholder="Share your thoughts..." required></textarea>
+          <button type="submit" class="btn-primary">Post Comment</button>
+        </form>` : `
+        <div class="comment-login">
+          <button class="btn-sm" onclick="openModal('loginModal')">Sign in to comment</button>
+        </div>`}
+      <div class="comments-list" id="commentsList">
+        <div class="loading-placeholder">Loading comments...</div>
+      </div>
     </div>`;
+  loadComments(n.id);
+}
+
+async function loadComments(novelId) {
+  const list = document.getElementById('commentsList');
+  const count = document.getElementById('commentCount');
+  if (!list) return;
+  try {
+    const res = await fetch(`${API}/api/novels/${novelId}/comments`, { credentials: 'include' });
+    const comments = await res.json();
+    if (count) count.textContent = comments.length;
+    if (!comments.length) {
+      list.innerHTML = '<div class="empty-comments">No comments yet</div>';
+      return;
+    }
+    list.innerHTML = comments.map(c => `
+      <div class="comment-item">
+        <div class="comment-meta">
+          <strong>${esc(c.username)}</strong>
+          <span>${formatDate(c.created_at)}</span>
+        </div>
+        <p>${esc(c.content)}</p>
+      </div>
+    `).join('');
+  } catch {
+    list.innerHTML = '<div class="empty-comments">Failed to load comments</div>';
+  }
+}
+
+async function handleCommentSubmit(e, novelId) {
+  e.preventDefault();
+  const input = document.getElementById('commentInput');
+  const content = input.value.trim();
+  if (!content) return;
+  const res = await fetch(`${API}/api/novels/${novelId}/comments`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content })
+  });
+  if (res.ok) {
+    input.value = '';
+    showToast('Comment added');
+    loadComments(novelId);
+  }
 }
 
 async function toggleFavorite(novelId) {
@@ -527,11 +610,16 @@ async function handleNovelForm(e) {
 }
 
 async function adminDeleteNovel(id) {
-  if (!confirm('Delete this novel and all its chapters?')) return;
-  await fetch(`${API}/api/novels/${id}`, { method: 'DELETE', credentials: 'include' });
-  showToast('Novel deleted');
-  loadAdminNovels();
-  loadNovels();
+  openDeleteConfirm({
+    title: 'Delete novel?',
+    message: 'This will delete the novel, its chapters, comments, favorites, and library saves.',
+    onConfirm: async () => {
+      await fetch(`${API}/api/novels/${id}`, { method: 'DELETE', credentials: 'include' });
+      showToast('Novel deleted');
+      loadAdminNovels();
+      loadNovels();
+    }
+  });
 }
 
 function openAddChapter(novelId) {
@@ -563,10 +651,15 @@ async function handleChapterForm(e) {
 }
 
 async function adminDeleteUser(id) {
-  if (!confirm('Delete this user?')) return;
-  await fetch(`${API}/api/admin/users/${id}`, { method: 'DELETE', credentials: 'include' });
-  showToast('User deleted');
-  loadAdminUsers();
+  openDeleteConfirm({
+    title: 'Delete user?',
+    message: 'This will delete the user and remove their comments, favorites, and library saves.',
+    onConfirm: async () => {
+      await fetch(`${API}/api/admin/users/${id}`, { method: 'DELETE', credentials: 'include' });
+      showToast('User deleted');
+      loadAdminUsers();
+    }
+  });
 }
 
 // ── FILTERS ───────────────────────────────────────────────────────
@@ -606,6 +699,21 @@ function switchModal(from, to) {
 }
 
 // ── UTILS ─────────────────────────────────────────────────────────
+function openDeleteConfirm({ title, message, onConfirm }) {
+  pendingDeleteAction = onConfirm;
+  document.getElementById('deleteConfirmTitle').textContent = title;
+  document.getElementById('deleteConfirmMessage').textContent = message;
+  openModal('deleteConfirmModal');
+}
+
+async function confirmDeleteAction() {
+  if (!pendingDeleteAction) return;
+  const action = pendingDeleteAction;
+  pendingDeleteAction = null;
+  closeModal('deleteConfirmModal');
+  await action();
+}
+
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
