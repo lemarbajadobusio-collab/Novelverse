@@ -119,6 +119,11 @@
     <div class="reader-toolbar">
       <button class="back-btn" id="readerBackBtn" onclick="backFromReader()">← Novel</button>
       <span class="reader-chapter-label" id="readerChapterLabel"></span>
+      <div class="reader-font-controls" aria-label="Reader font size">
+        <button type="button" onclick="changeReaderFontSize(-1)" title="Decrease font size">A-</button>
+        <span id="readerFontSizeLabel">19px</span>
+        <button type="button" onclick="changeReaderFontSize(1)" title="Increase font size">A+</button>
+      </div>
       <div class="reader-nav">
         <button id="prevChBtn" onclick="navigateChapter(-1)">‹ Prev</button>
         <button id="nextChBtn" onclick="navigateChapter(1)">Next ›</button>
@@ -310,6 +315,21 @@
       <div class="form-error hidden" id="chapterFormError"></div>
       <button type="submit" class="btn-full">Save Chapter</button>
     </form>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-overlay hidden" id="deleteConfirmModal" onclick="closeModalOnOverlay(event,'deleteConfirmModal')">
+  <div class="modal modal-confirm">
+    <button class="modal-close" onclick="closeModal('deleteConfirmModal')">Ã—</button>
+    <div class="modal-header">
+      <h2 id="deleteConfirmTitle">Delete item?</h2>
+      <p id="deleteConfirmMessage">This action cannot be undone.</p>
+    </div>
+    <div class="confirm-actions">
+      <button type="button" class="btn-ghost" onclick="closeModal('deleteConfirmModal')">Cancel</button>
+      <button type="button" class="btn-primary btn-confirm-danger" onclick="confirmDeleteAction()">Delete</button>
+    </div>
   </div>
 </div>
 
