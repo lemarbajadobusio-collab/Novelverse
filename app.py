@@ -1,11 +1,25 @@
 ﻿from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
-import sqlite3
 import hashlib
 import os
 import json
-from datetime import datetime
+from datetime import date, datetime
 from functools import wraps
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    inspect,
+    text as sql_text,
+)
+from sqlalchemy.exc import IntegrityError
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = BASE_DIR
@@ -13,8 +27,6 @@ FRONTEND_DIR = BASE_DIR
 app = Flask(__name__, static_folder=None)
 app.secret_key = 'novel_secret_key_2024'
 CORS(app, supports_credentials=True)
-
-DB_PATH = os.path.join(BASE_DIR, 'novels.db')
 
 def load_env_file():
     env_path = os.path.join(BASE_DIR, '.env')
@@ -31,85 +43,123 @@ def load_env_file():
 
 load_env_file()
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def database_url():
+    url = (
+        os.environ.get('SUPABASE_DATABASE_URL')
+        or os.environ.get('DATABASE_URL')
+        or f"sqlite:///{os.path.join(BASE_DIR, 'novels.db')}"
+    )
+    if url.startswith('postgres://'):
+        return 'postgresql+psycopg://' + url[len('postgres://'):]
+    if url.startswith('postgresql://') and '+psycopg' not in url:
+        return 'postgresql+psycopg://' + url[len('postgresql://'):]
+    return url
+
+DB_URL = database_url()
+ENGINE_OPTIONS = {'future': True, 'pool_pre_ping': True}
+if DB_URL.startswith('sqlite:///'):
+    ENGINE_OPTIONS['connect_args'] = {'check_same_thread': False}
+
+engine = create_engine(DB_URL, **ENGINE_OPTIONS)
+metadata = MetaData()
+
+users = Table(
+    'users', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('username', String, nullable=False, unique=True),
+    Column('email', String, nullable=False, unique=True),
+    Column('password', String, nullable=False),
+    Column('role', String, server_default='user'),
+    Column('avatar', Text, server_default=''),
+    Column('created_at', DateTime, server_default=sql_text('CURRENT_TIMESTAMP')),
+)
+
+novels = Table(
+    'novels', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('title', String, nullable=False),
+    Column('author', String, nullable=False),
+    Column('description', Text),
+    Column('cover', Text, server_default=''),
+    Column('genre', String, server_default=''),
+    Column('status', String, server_default='ongoing'),
+    Column('views', Integer, server_default='0'),
+    Column('created_at', DateTime, server_default=sql_text('CURRENT_TIMESTAMP')),
+    Column('updated_at', DateTime, server_default=sql_text('CURRENT_TIMESTAMP')),
+)
+
+chapters = Table(
+    'chapters', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('novel_id', Integer, ForeignKey('novels.id'), nullable=False),
+    Column('chapter_number', Integer, nullable=False),
+    Column('title', String, nullable=False),
+    Column('content', Text, nullable=False),
+    Column('created_at', DateTime, server_default=sql_text('CURRENT_TIMESTAMP')),
+)
+
+favorites = Table(
+    'favorites', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('user_id', Integer, ForeignKey('users.id'), nullable=False),
+    Column('novel_id', Integer, ForeignKey('novels.id'), nullable=False),
+    Column('created_at', DateTime, server_default=sql_text('CURRENT_TIMESTAMP')),
+    UniqueConstraint('user_id', 'novel_id'),
+)
+
+library = Table(
+    'library', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('user_id', Integer, ForeignKey('users.id'), nullable=False),
+    Column('novel_id', Integer, ForeignKey('novels.id'), nullable=False),
+    Column('last_chapter', Integer, server_default='1'),
+    Column('created_at', DateTime, server_default=sql_text('CURRENT_TIMESTAMP')),
+    UniqueConstraint('user_id', 'novel_id'),
+)
+
+comments = Table(
+    'comments', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('user_id', Integer, ForeignKey('users.id'), nullable=False),
+    Column('novel_id', Integer, ForeignKey('novels.id'), nullable=False),
+    Column('content', Text, nullable=False),
+    Column('created_at', DateTime, server_default=sql_text('CURRENT_TIMESTAMP')),
+)
+
+def json_ready(value):
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
+
+def row_dict(row):
+    return {key: json_ready(row[key]) for key in row.keys()}
+
+def fetch_one(query, params=None):
+    with engine.connect() as conn:
+        row = conn.execute(sql_text(query), params or {}).mappings().fetchone()
+        return row_dict(row) if row else None
+
+def fetch_all(query, params=None):
+    with engine.connect() as conn:
+        rows = conn.execute(sql_text(query), params or {}).mappings().fetchall()
+        return [row_dict(row) for row in rows]
+
+def execute(query, params=None):
+    with engine.begin() as conn:
+        conn.execute(sql_text(query), params or {})
+
+def execute_returning_id(query, params=None):
+    with engine.begin() as conn:
+        if engine.dialect.name == 'postgresql':
+            return conn.execute(sql_text(f"{query} RETURNING id"), params or {}).scalar_one()
+        result = conn.execute(sql_text(query), params or {})
+        return result.lastrowid
 
 def init_db():
-    conn = get_db()
-    c = conn.cursor()
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT DEFAULT 'user',
-        avatar TEXT DEFAULT '',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS novels (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        author TEXT NOT NULL,
-        description TEXT,
-        cover TEXT DEFAULT '',
-        genre TEXT DEFAULT '',
-        status TEXT DEFAULT 'ongoing',
-        views INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-
-    novel_columns = {row[1] for row in c.execute("PRAGMA table_info(novels)").fetchall()}
+    metadata.create_all(engine)
+    novel_columns = {col['name'] for col in inspect(engine).get_columns('novels')}
     if 'cover' not in novel_columns:
-        c.execute("ALTER TABLE novels ADD COLUMN cover TEXT DEFAULT ''")
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS chapters (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        novel_id INTEGER NOT NULL,
-        chapter_number INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (novel_id) REFERENCES novels(id)
-    )''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS favorites (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        novel_id INTEGER NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, novel_id),
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (novel_id) REFERENCES novels(id)
-    )''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS library (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        novel_id INTEGER NOT NULL,
-        last_chapter INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, novel_id),
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (novel_id) REFERENCES novels(id)
-    )''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS comments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        novel_id INTEGER NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (novel_id) REFERENCES novels(id)
-    )''')
-    
-    conn.commit()
-    conn.close()
+        execute("ALTER TABLE novels ADD COLUMN cover TEXT DEFAULT ''")
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -146,12 +196,12 @@ def register():
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
     
-    conn = get_db()
     try:
-        conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
-                     (username, email, hash_password(password)))
-        conn.commit()
-        user = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        execute(
+            "INSERT INTO users (username, email, password) VALUES (:username, :email, :password)",
+            {'username': username, 'email': email, 'password': hash_password(password)}
+        )
+        user = fetch_one("SELECT * FROM users WHERE email=:email", {'email': email})
         session['user_id'] = user['id']
         session['username'] = user['username']
         session['role'] = user['role']
@@ -159,10 +209,8 @@ def register():
             'id': user['id'], 'username': user['username'],
             'email': user['email'], 'role': user['role']
         }})
-    except sqlite3.IntegrityError:
+    except IntegrityError:
         return jsonify({'error': 'Username or email already exists'}), 400
-    finally:
-        conn.close()
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -170,10 +218,10 @@ def login():
     email = data.get('email', '').strip()
     password = data.get('password', '')
     
-    conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE email=? AND password=?",
-                        (email, hash_password(password))).fetchone()
-    conn.close()
+    user = fetch_one(
+        "SELECT * FROM users WHERE email=:email AND password=:password",
+        {'email': email, 'password': hash_password(password)}
+    )
     
     if not user:
         return jsonify({'error': 'Invalid email or password'}), 401
@@ -195,13 +243,13 @@ def logout():
 def me():
     if 'user_id' not in session:
         return jsonify({'user': None})
-    conn = get_db()
-    user = conn.execute("SELECT id, username, email, role, created_at FROM users WHERE id=?",
-                        (session['user_id'],)).fetchone()
-    conn.close()
+    user = fetch_one(
+        "SELECT id, username, email, role, created_at FROM users WHERE id=:id",
+        {'id': session['user_id']}
+    )
     if not user:
         return jsonify({'user': None})
-    return jsonify({'user': dict(user)})
+    return jsonify({'user': user})
 
 # â”€â”€â”€ NOVELS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -216,108 +264,117 @@ def supabase_config():
 def get_novels():
     genre = request.args.get('genre', '')
     search = request.args.get('search', '')
-    conn = get_db()
     
     query = "SELECT n.*, COUNT(DISTINCT c.id) as chapter_count FROM novels n LEFT JOIN chapters c ON n.id=c.novel_id"
-    params = []
+    params = {}
     
     conditions = []
     if genre:
-        conditions.append("n.genre=?")
-        params.append(genre)
+        conditions.append("n.genre=:genre")
+        params['genre'] = genre
     if search:
-        conditions.append("(n.title LIKE ? OR n.author LIKE ?)")
-        params.extend([f'%{search}%', f'%{search}%'])
+        conditions.append("(n.title LIKE :search OR n.author LIKE :search)")
+        params['search'] = f'%{search}%'
     
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     query += " GROUP BY n.id ORDER BY n.updated_at DESC"
     
-    novels = conn.execute(query, params).fetchall()
-    conn.close()
-    return jsonify([dict(n) for n in novels])
+    return jsonify(fetch_all(query, params))
 
 @app.route('/api/novels/<int:novel_id>', methods=['GET'])
 def get_novel(novel_id):
-    conn = get_db()
-    conn.execute("UPDATE novels SET views=views+1 WHERE id=?", (novel_id,))
-    conn.commit()
-    novel = conn.execute("SELECT * FROM novels WHERE id=?", (novel_id,)).fetchone()
+    execute("UPDATE novels SET views=views+1 WHERE id=:id", {'id': novel_id})
+    novel = fetch_one("SELECT * FROM novels WHERE id=:id", {'id': novel_id})
     if not novel:
         return jsonify({'error': 'Novel not found'}), 404
     
-    chapters = conn.execute("SELECT id, chapter_number, title, created_at FROM chapters WHERE novel_id=? ORDER BY chapter_number",
-                            (novel_id,)).fetchall()
+    chapters = fetch_all(
+        "SELECT id, chapter_number, title, created_at FROM chapters WHERE novel_id=:novel_id ORDER BY chapter_number",
+        {'novel_id': novel_id}
+    )
     
-    fav_count = conn.execute("SELECT COUNT(*) as c FROM favorites WHERE novel_id=?", (novel_id,)).fetchone()['c']
+    fav_count = fetch_one("SELECT COUNT(*) as c FROM favorites WHERE novel_id=:novel_id", {'novel_id': novel_id})['c']
     
-    result = dict(novel)
-    result['chapters'] = [dict(c) for c in chapters]
+    result = novel
+    result['chapters'] = chapters
     result['favorite_count'] = fav_count
     
     if 'user_id' in session:
-        fav = conn.execute("SELECT id FROM favorites WHERE user_id=? AND novel_id=?",
-                           (session['user_id'], novel_id)).fetchone()
-        lib = conn.execute("SELECT id FROM library WHERE user_id=? AND novel_id=?",
-                           (session['user_id'], novel_id)).fetchone()
+        fav = fetch_one(
+            "SELECT id FROM favorites WHERE user_id=:user_id AND novel_id=:novel_id",
+            {'user_id': session['user_id'], 'novel_id': novel_id}
+        )
+        lib = fetch_one(
+            "SELECT id FROM library WHERE user_id=:user_id AND novel_id=:novel_id",
+            {'user_id': session['user_id'], 'novel_id': novel_id}
+        )
         result['is_favorited'] = fav is not None
         result['in_library'] = lib is not None
     
-    conn.close()
     return jsonify(result)
 
 @app.route('/api/novels', methods=['POST'])
 @admin_required
 def create_novel():
     data = request.json
-    conn = get_db()
-    conn.execute("INSERT INTO novels (title, author, description, cover, genre, status) VALUES (?, ?, ?, ?, ?, ?)",
-                 (data['title'], data['author'], data.get('description', ''),
-                  data.get('cover', ''), data.get('genre', ''), data.get('status', 'ongoing')))
-    conn.commit()
-    novel_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.close()
+    novel_id = execute_returning_id(
+        "INSERT INTO novels (title, author, description, cover, genre, status) VALUES (:title, :author, :description, :cover, :genre, :status)",
+        {
+            'title': data['title'],
+            'author': data['author'],
+            'description': data.get('description', ''),
+            'cover': data.get('cover', ''),
+            'genre': data.get('genre', ''),
+            'status': data.get('status', 'ongoing'),
+        }
+    )
     return jsonify({'message': 'Novel created', 'id': novel_id})
 
 @app.route('/api/novels/<int:novel_id>', methods=['PUT'])
 @admin_required
 def update_novel(novel_id):
     data = request.json
-    conn = get_db()
-    conn.execute("UPDATE novels SET title=?, author=?, description=?, cover=?, genre=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                 (data['title'], data['author'], data.get('description', ''),
-                  data.get('cover', ''), data.get('genre', ''), data.get('status', 'ongoing'), novel_id))
-    conn.commit()
-    conn.close()
+    execute(
+        "UPDATE novels SET title=:title, author=:author, description=:description, cover=:cover, genre=:genre, status=:status, updated_at=CURRENT_TIMESTAMP WHERE id=:id",
+        {
+            'title': data['title'],
+            'author': data['author'],
+            'description': data.get('description', ''),
+            'cover': data.get('cover', ''),
+            'genre': data.get('genre', ''),
+            'status': data.get('status', 'ongoing'),
+            'id': novel_id,
+        }
+    )
     return jsonify({'message': 'Novel updated'})
 
 @app.route('/api/novels/<int:novel_id>', methods=['DELETE'])
 @admin_required
 def delete_novel(novel_id):
-    conn = get_db()
-    conn.execute("DELETE FROM chapters WHERE novel_id=?", (novel_id,))
-    conn.execute("DELETE FROM favorites WHERE novel_id=?", (novel_id,))
-    conn.execute("DELETE FROM library WHERE novel_id=?", (novel_id,))
-    conn.execute("DELETE FROM novels WHERE id=?", (novel_id,))
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        conn.execute(sql_text("DELETE FROM chapters WHERE novel_id=:novel_id"), {'novel_id': novel_id})
+        conn.execute(sql_text("DELETE FROM favorites WHERE novel_id=:novel_id"), {'novel_id': novel_id})
+        conn.execute(sql_text("DELETE FROM library WHERE novel_id=:novel_id"), {'novel_id': novel_id})
+        conn.execute(sql_text("DELETE FROM comments WHERE novel_id=:novel_id"), {'novel_id': novel_id})
+        conn.execute(sql_text("DELETE FROM novels WHERE id=:id"), {'id': novel_id})
     return jsonify({'message': 'Novel deleted'})
 
 # â”€â”€â”€ CHAPTERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/novels/<int:novel_id>/chapters/<int:ch_num>', methods=['GET'])
 def get_chapter(novel_id, ch_num):
-    conn = get_db()
-    chapter = conn.execute("SELECT * FROM chapters WHERE novel_id=? AND chapter_number=?",
-                           (novel_id, ch_num)).fetchone()
+    chapter = fetch_one(
+        "SELECT * FROM chapters WHERE novel_id=:novel_id AND chapter_number=:chapter_number",
+        {'novel_id': novel_id, 'chapter_number': ch_num}
+    )
     if not chapter:
         return jsonify({'error': 'Chapter not found'}), 404
     
-    total = conn.execute("SELECT COUNT(*) as c FROM chapters WHERE novel_id=?", (novel_id,)).fetchone()['c']
-    novel = conn.execute("SELECT title FROM novels WHERE id=?", (novel_id,)).fetchone()
-    conn.close()
+    total = fetch_one("SELECT COUNT(*) as c FROM chapters WHERE novel_id=:novel_id", {'novel_id': novel_id})['c']
+    novel = fetch_one("SELECT title FROM novels WHERE id=:id", {'id': novel_id})
     
-    result = dict(chapter)
+    result = chapter
     result['total_chapters'] = total
     result['novel_title'] = novel['title']
     return jsonify(result)
@@ -326,33 +383,32 @@ def get_chapter(novel_id, ch_num):
 @admin_required
 def add_chapter(novel_id):
     data = request.json
-    conn = get_db()
-    ch_num = conn.execute("SELECT COALESCE(MAX(chapter_number),0)+1 as n FROM chapters WHERE novel_id=?", (novel_id,)).fetchone()['n']
-    conn.execute("INSERT INTO chapters (novel_id, chapter_number, title, content) VALUES (?, ?, ?, ?)",
-                 (novel_id, ch_num, data['title'], data['content']))
-    conn.execute("UPDATE novels SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (novel_id,))
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        ch_num = conn.execute(
+            sql_text("SELECT COALESCE(MAX(chapter_number),0)+1 as n FROM chapters WHERE novel_id=:novel_id"),
+            {'novel_id': novel_id}
+        ).mappings().fetchone()['n']
+        conn.execute(
+            sql_text("INSERT INTO chapters (novel_id, chapter_number, title, content) VALUES (:novel_id, :chapter_number, :title, :content)"),
+            {'novel_id': novel_id, 'chapter_number': ch_num, 'title': data['title'], 'content': data['content']}
+        )
+        conn.execute(sql_text("UPDATE novels SET updated_at=CURRENT_TIMESTAMP WHERE id=:id"), {'id': novel_id})
     return jsonify({'message': 'Chapter added', 'chapter_number': ch_num})
 
 @app.route('/api/chapters/<int:chapter_id>', methods=['PUT'])
 @admin_required
 def update_chapter(chapter_id):
     data = request.json
-    conn = get_db()
-    conn.execute("UPDATE chapters SET title=?, content=? WHERE id=?",
-                 (data['title'], data['content'], chapter_id))
-    conn.commit()
-    conn.close()
+    execute(
+        "UPDATE chapters SET title=:title, content=:content WHERE id=:id",
+        {'title': data['title'], 'content': data['content'], 'id': chapter_id}
+    )
     return jsonify({'message': 'Chapter updated'})
 
 @app.route('/api/chapters/<int:chapter_id>', methods=['DELETE'])
 @admin_required
 def delete_chapter(chapter_id):
-    conn = get_db()
-    conn.execute("DELETE FROM chapters WHERE id=?", (chapter_id,))
-    conn.commit()
-    conn.close()
+    execute("DELETE FROM chapters WHERE id=:id", {'id': chapter_id})
     return jsonify({'message': 'Chapter deleted'})
 
 # â”€â”€â”€ FAVORITES & LIBRARY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -360,63 +416,61 @@ def delete_chapter(chapter_id):
 @app.route('/api/favorites', methods=['GET'])
 @login_required
 def get_favorites():
-    conn = get_db()
-    favs = conn.execute('''SELECT n.*, COUNT(DISTINCT c.id) as chapter_count 
-                           FROM favorites f JOIN novels n ON f.novel_id=n.id
-                           LEFT JOIN chapters c ON n.id=c.novel_id
-                           WHERE f.user_id=? GROUP BY n.id''',
-                        (session['user_id'],)).fetchall()
-    conn.close()
-    return jsonify([dict(f) for f in favs])
+    favs = fetch_all('''SELECT n.*, COUNT(DISTINCT c.id) as chapter_count 
+                        FROM favorites f JOIN novels n ON f.novel_id=n.id
+                        LEFT JOIN chapters c ON n.id=c.novel_id
+                        WHERE f.user_id=:user_id GROUP BY n.id''',
+                     {'user_id': session['user_id']})
+    return jsonify(favs)
 
 @app.route('/api/favorites/<int:novel_id>', methods=['POST'])
 @login_required
 def toggle_favorite(novel_id):
-    conn = get_db()
-    existing = conn.execute("SELECT id FROM favorites WHERE user_id=? AND novel_id=?",
-                            (session['user_id'], novel_id)).fetchone()
+    existing = fetch_one(
+        "SELECT id FROM favorites WHERE user_id=:user_id AND novel_id=:novel_id",
+        {'user_id': session['user_id'], 'novel_id': novel_id}
+    )
     if existing:
-        conn.execute("DELETE FROM favorites WHERE user_id=? AND novel_id=?",
-                     (session['user_id'], novel_id))
-        conn.commit()
-        conn.close()
+        execute(
+            "DELETE FROM favorites WHERE user_id=:user_id AND novel_id=:novel_id",
+            {'user_id': session['user_id'], 'novel_id': novel_id}
+        )
         return jsonify({'favorited': False})
     else:
-        conn.execute("INSERT INTO favorites (user_id, novel_id) VALUES (?, ?)",
-                     (session['user_id'], novel_id))
-        conn.commit()
-        conn.close()
+        execute(
+            "INSERT INTO favorites (user_id, novel_id) VALUES (:user_id, :novel_id)",
+            {'user_id': session['user_id'], 'novel_id': novel_id}
+        )
         return jsonify({'favorited': True})
 
 @app.route('/api/library', methods=['GET'])
 @login_required
 def get_library():
-    conn = get_db()
-    lib = conn.execute('''SELECT n.*, l.last_chapter, COUNT(DISTINCT c.id) as chapter_count
-                          FROM library l JOIN novels n ON l.novel_id=n.id
-                          LEFT JOIN chapters c ON n.id=c.novel_id
-                          WHERE l.user_id=? GROUP BY n.id''',
-                       (session['user_id'],)).fetchall()
-    conn.close()
-    return jsonify([dict(l) for l in lib])
+    lib = fetch_all('''SELECT n.*, l.last_chapter, COUNT(DISTINCT c.id) as chapter_count
+                       FROM library l JOIN novels n ON l.novel_id=n.id
+                       LEFT JOIN chapters c ON n.id=c.novel_id
+                       WHERE l.user_id=:user_id GROUP BY n.id, l.last_chapter''',
+                    {'user_id': session['user_id']})
+    return jsonify(lib)
 
 @app.route('/api/library/<int:novel_id>', methods=['POST'])
 @login_required
 def toggle_library(novel_id):
-    conn = get_db()
-    existing = conn.execute("SELECT id FROM library WHERE user_id=? AND novel_id=?",
-                            (session['user_id'], novel_id)).fetchone()
+    existing = fetch_one(
+        "SELECT id FROM library WHERE user_id=:user_id AND novel_id=:novel_id",
+        {'user_id': session['user_id'], 'novel_id': novel_id}
+    )
     if existing:
-        conn.execute("DELETE FROM library WHERE user_id=? AND novel_id=?",
-                     (session['user_id'], novel_id))
-        conn.commit()
-        conn.close()
+        execute(
+            "DELETE FROM library WHERE user_id=:user_id AND novel_id=:novel_id",
+            {'user_id': session['user_id'], 'novel_id': novel_id}
+        )
         return jsonify({'in_library': False})
     else:
-        conn.execute("INSERT INTO library (user_id, novel_id) VALUES (?, ?)",
-                     (session['user_id'], novel_id))
-        conn.commit()
-        conn.close()
+        execute(
+            "INSERT INTO library (user_id, novel_id) VALUES (:user_id, :novel_id)",
+            {'user_id': session['user_id'], 'novel_id': novel_id}
+        )
         return jsonify({'in_library': True})
 
 # â”€â”€â”€ ADMIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -424,34 +478,31 @@ def toggle_library(novel_id):
 @app.route('/api/admin/stats', methods=['GET'])
 @admin_required
 def admin_stats():
-    conn = get_db()
     stats = {
-        'total_novels': conn.execute("SELECT COUNT(*) as c FROM novels").fetchone()['c'],
-        'total_chapters': conn.execute("SELECT COUNT(*) as c FROM chapters").fetchone()['c'],
-        'total_users': conn.execute("SELECT COUNT(*) as c FROM users").fetchone()['c'],
-        'total_views': conn.execute("SELECT COALESCE(SUM(views),0) as c FROM novels").fetchone()['c'],
-        'total_favorites': conn.execute("SELECT COUNT(*) as c FROM favorites").fetchone()['c'],
+        'total_novels': fetch_one("SELECT COUNT(*) as c FROM novels")['c'],
+        'total_chapters': fetch_one("SELECT COUNT(*) as c FROM chapters")['c'],
+        'total_users': fetch_one("SELECT COUNT(*) as c FROM users")['c'],
+        'total_views': fetch_one("SELECT COALESCE(SUM(views),0) as c FROM novels")['c'],
+        'total_favorites': fetch_one("SELECT COUNT(*) as c FROM favorites")['c'],
     }
-    conn.close()
     return jsonify(stats)
 
 @app.route('/api/admin/users', methods=['GET'])
 @admin_required
 def admin_users():
-    conn = get_db()
-    users = conn.execute("SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC").fetchall()
-    conn.close()
-    return jsonify([dict(u) for u in users])
+    users = fetch_all("SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC")
+    return jsonify(users)
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def delete_user(user_id):
     if user_id == session['user_id']:
         return jsonify({'error': 'Cannot delete yourself'}), 400
-    conn = get_db()
-    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        conn.execute(sql_text("DELETE FROM favorites WHERE user_id=:user_id"), {'user_id': user_id})
+        conn.execute(sql_text("DELETE FROM library WHERE user_id=:user_id"), {'user_id': user_id})
+        conn.execute(sql_text("DELETE FROM comments WHERE user_id=:user_id"), {'user_id': user_id})
+        conn.execute(sql_text("DELETE FROM users WHERE id=:id"), {'id': user_id})
     return jsonify({'message': 'User deleted'})
 
 # â”€â”€â”€ SERVE FRONTEND â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -467,8 +518,9 @@ def static_files(path):
         return jsonify({'error': 'Not found'}), 404
     return send_from_directory(FRONTEND_DIR, path)
 
+init_db()
+
 if __name__ == '__main__':
     os.makedirs('static', exist_ok=True)
-    init_db()
     print("NovelVerse running at http://localhost:5000")
     app.run(debug=True, port=5000)
